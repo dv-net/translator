@@ -1,0 +1,55 @@
+{
+  "name": "@dv.net/translator",
+  "version": "1.0.0",
+  "private": false,
+  "description": "CLI and library for translating JSON and Markdown files into multiple locales",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "bin": {
+    "dv-translator": "bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dv-net/translator.git"
+  },
+  "homepage": "https://github.com/dv-net/translator#readme",
+  "bugs": {
+    "url": "https://github.com/dv-net/translator/issues"
+  },
+  "author": "DV Net",
+  "keywords": [
+    "dv-net",
+    "translator",
+    "json",
+    "markdown",
+    "localization",
+    "i18n",
+    "cli"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "start": "node bin/cli.js",
+    "pack:check": "npm pack --dry-run"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "commander": "^11.1.0",
+    "fs-extra": "^11.1.1",
+    "openai": "^5.13.1"
+  }
+}
