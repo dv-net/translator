@@ -33,6 +33,7 @@ const LANGUAGES = [
   { id: 32, name: 'Turkish', isoCode: 'tr', originalName: 'Türkçe' },
   { id: 12, name: 'Ukrainian', isoCode: 'uk', originalName: 'Українська' },
   { id: 34, name: 'Vietnam', isoCode: 'vi', originalName: 'Tiếng Việt' },
+  { id: 35, name: 'Belarusian', isoCode: 'be', originalName: 'Беларуская' },
 ];
 
 export { LANGUAGES };
