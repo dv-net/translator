@@ -41,6 +41,18 @@ export class ProgressTracker {
     }
   }
 
+  getLocaleProgress(locale) {
+    return this.localeProgress.get(locale) || 0;
+  }
+
+  getTotalProgress() {
+    let sum = 0;
+    for (const locale of this.activeLocales) {
+      sum += this.getLocaleProgress(locale);
+    }
+    return sum;
+  }
+
   reset() {
     this.localeProgress.clear();
     this.activeLocales.clear();

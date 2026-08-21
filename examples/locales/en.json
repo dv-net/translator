@@ -1,0 +1,52 @@
+{
+  "buttons": {
+    "submit": "Submit",
+    "saveAndContinue": "Save & continue"
+  },
+  "errors": {
+    "required": "This field is required",
+    "notFound": "Page not found",
+    "emailInvalid": "Please enter a valid email address",
+    "passwordTooShort": "Password must be at least {min} characters",
+    "network": "Network error. Please try again later"
+  },
+  "greeting": "Hello, {name}!",
+  "placeholders": {
+    "named": "Hi {firstName}, you have {count} new messages.",
+    "mixed": "Order #{orderId} for {customerName} — total: {amount} {currency}",
+    "nestedBraces": "Use {{raw}} to escape, or {value} to interpolate",
+    "percent": "Progress: {percent}% complete",
+    "urlKeep": "Open https://example.com/docs?lang=en#intro for details"
+  },
+  "html": {
+    "richText": "Click <a href=\"/settings\">here</a> to update your profile.",
+    "boldAndLink": "Read the <b>Terms of Service</b> and <a href=\"/privacy\">Privacy Policy</a>.",
+    "withPlaceholder": "Welcome back, <strong>{name}</strong>!"
+  },
+  "codeAndTech": {
+    "keepCode": "Run `npm install` then `yarn start translate --dir ./locales`.",
+    "envVar": "Set OPENAI_API_KEY before running the CLI.",
+    "jsonPath": "Missing key at path: users[0].profile.displayName",
+    "camelCaseIds": "Created workspace workspaceId={workspaceId} for org={orgSlug}"
+  },
+  "punctuation": {
+    "quotes": "She said, \"That's amazing!\" and left.",
+    "ellipsis": "Loading… please wait",
+    "units": "File size: 12.5 MB (max 100 MB)"
+  },
+  "edgeCases": {
+    "emptyish": " ",
+    "numbersOnly": "404",
+    "alreadyTranslatedLooking": "OK",
+    "sameInManyLocales": "API",
+    "keepAcronyms": "Enable SSL/TLS for SMTP connections",
+    "currencyKeep": "Amount due: $1,234.56 USD"
+  },
+  "{aml} is not connected": "{aml} is not connected",
+  "dvAdmin": {
+    "usdtViaTrxEnergy": "A simple way to start accepting USDT is to transfer it via TRX from hot wallets to cold wallets. In this case, each transaction will cost around $2–5 (about 65,000–130,000 Energy)",
+    "address-book-tooltip-text": "The address is specified in the withdrawal rules of {blockchain}",
+    "minimum-deposit-store": "The minimum deposit amount is not less than {amount}",
+    "hideDustSpam": "If this option is enabled, we will hide and not take into account small balances, crypto-spam and dust on the wallets"
+  }
+}

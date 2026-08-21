@@ -1,28 +1,67 @@
 import fs from 'fs-extra';
 import path from 'path';
 import HashManager from './hash-manager.js';
-import { translateWithGoogle } from './providers/google.js';
 import { translateTextWithGpt, translateMarkdownWithGpt } from './providers/gpt.js';
 import { ProgressTracker } from './utils/progress.js';
 import { formatDuration } from './utils/format-duration.js';
 import { isSafeObjectKey } from './utils/safe-object.js';
+import { addTokenUsage, createTokenUsage, formatTokenUsage } from './utils/token-usage.js';
+import { DEFAULT_MODEL, DEFAULT_THREADS } from './constants/defaults.js';
 
 class Translator {
-  constructor({ provider = 'google', openAiKey = null, maxConcurrent = 5, model = 'gpt-4o-mini' } = {}) {
-    this.provider = provider;
+  constructor({
+    openAiKey = null,
+    maxConcurrent = DEFAULT_THREADS,
+    model = DEFAULT_MODEL,
+    context = null,
+  } = {}) {
     this.openAiKey = openAiKey;
     this.maxConcurrent = maxConcurrent;
     this.model = model;
+    this.context = context;
     this.translationCache = new Map();
     this.progressTracker = new ProgressTracker();
     this.semaphore = maxConcurrent;
     this.hashManager = null;
+    this.abortError = null;
+    this.abortLocale = null;
+    this.tokenUsage = createTokenUsage();
+  }
+
+  resetAbortState() {
+    this.abortError = null;
+    this.abortLocale = null;
+  }
+
+  resetTokenUsage() {
+    this.tokenUsage = createTokenUsage();
+  }
+
+  abort(error, locale) {
+    if (!this.abortError) {
+      this.abortError = error;
+      this.abortLocale = locale;
+    }
+  }
+
+  throwIfAborted() {
+    if (this.abortError) {
+      const error = new Error(
+        this.abortLocale
+          ? `Aborted after failure in ${this.abortLocale}: ${this.abortError.message}`
+          : this.abortError.message,
+      );
+      error.cause = this.abortError;
+      throw error;
+    }
   }
 
   async acquire() {
     while (this.semaphore <= 0) {
+      this.throwIfAborted();
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
+    this.throwIfAborted();
     this.semaphore--;
   }
 
@@ -46,32 +85,45 @@ class Translator {
       return text;
     }
 
+    this.throwIfAborted();
+
     const cacheKey = `${text}_${sourceLocale}_${targetLocale}`;
     if (this.translationCache.has(cacheKey)) {
       return this.translationCache.get(cacheKey);
     }
 
+    let acquired = false;
     try {
       await this.acquire();
+      acquired = true;
+      this.throwIfAborted();
 
-      let translatedText;
-      if (this.provider === 'gpt') {
-        translatedText = await translateTextWithGpt(text, targetLocale, sourceLocale, this.openAiKey, this.model);
-      } else {
-        translatedText = await translateWithGoogle(text, targetLocale, sourceLocale);
-      }
+      const { text: translatedText, usage } = await translateTextWithGpt(
+        text,
+        targetLocale,
+        sourceLocale,
+        this.openAiKey,
+        this.model,
+        { context: this.context },
+      );
 
+      addTokenUsage(this.tokenUsage, usage);
       this.translationCache.set(cacheKey, translatedText);
       return translatedText;
     } catch (error) {
-      console.warn(`\nTranslation error (${targetLocale}):`, error.message);
-      return text;
+      if (error?.cause === this.abortError || (this.abortError && error.message.startsWith('Aborted after failure'))) {
+        throw error;
+      }
+      this.abort(error, targetLocale);
+      throw error;
     } finally {
-      this.release();
+      if (acquired) this.release();
     }
   }
 
   async translateObject(obj, targetLocale, sourceLocale = 'en', partialResult = null, objectPath = []) {
+    this.throwIfAborted();
+
     if (typeof obj === 'string') {
       const result = await this.translateText(obj, targetLocale, sourceLocale);
       this.progressTracker.incrementProgress(targetLocale);
@@ -106,22 +158,31 @@ class Translator {
       const translatedObj = {};
       for (const [key, value] of Object.entries(obj)) {
         if (!isSafeObjectKey(key)) continue;
-        if (key === 'staticStrings') {
-          translatedObj[key] = value;
-        } else {
-          translatedObj[key] = await this.translateObject(
-            value,
-            targetLocale,
-            sourceLocale,
-            partialResult,
-            objectPath.concat(key),
-          );
-        }
+        translatedObj[key] = await this.translateObject(
+          value,
+          targetLocale,
+          sourceLocale,
+          partialResult,
+          objectPath.concat(key),
+        );
       }
       return translatedObj;
     }
 
     return obj;
+  }
+
+  async savePartialTranslation(locale, partialResult) {
+    if (!partialResult || Object.keys(partialResult).length === 0) {
+      return null;
+    }
+
+    try {
+      return await this.hashManager.saveTranslation(locale, partialResult);
+    } catch (error) {
+      console.warn(`⚠️  Failed to save partial result for ${locale}:`, error.message);
+      return null;
+    }
   }
 
   async translateLocale(sourceJson, locale) {
@@ -130,6 +191,7 @@ class Translator {
 
     try {
       this.progressTracker.setLocale(locale);
+      this.throwIfAborted();
 
       intervalId = setInterval(async () => {
         try {
@@ -142,16 +204,75 @@ class Translator {
       const translatedJson = await this.translateObject(sourceJson, locale, 'en', partialResult);
       const outputPath = await this.hashManager.saveTranslation(locale, translatedJson);
 
-      return { locale, success: true, path: outputPath };
+      return {
+        locale,
+        success: true,
+        path: outputPath,
+        translatedCount: this.progressTracker.getLocaleProgress(locale),
+      };
     } catch (error) {
-      return { locale, success: false, error: error.message };
+      const path = await this.savePartialTranslation(locale, partialResult);
+      const isPrimaryFailure = this.abortLocale === locale;
+
+      return {
+        locale,
+        success: false,
+        error: isPrimaryFailure
+          ? error.message
+          : `Aborted after failure in ${this.abortLocale}: ${this.abortError?.message || error.message}`,
+        path,
+        translatedCount: this.progressTracker.getLocaleProgress(locale),
+        aborted: !isPrimaryFailure,
+      };
     } finally {
       if (intervalId) clearInterval(intervalId);
     }
   }
 
+  printJsonReport({ force, duration, totalStrings, locales, results, success }) {
+    const successCount = results.filter((result) => result.success).length;
+    const translatedTotal = results.reduce((sum, result) => sum + (result.translatedCount || 0), 0);
+    const primaryFailure = results.find((result) => result.success === false && !result.aborted);
+
+    console.log('');
+    console.log('='.repeat(60));
+    if (success) {
+      console.log(force ? '✅ Force translation completed!' : '✅ Translation completed!');
+    } else {
+      console.log('❌ Translation stopped due to an error');
+    }
+    console.log(`⏱️  Duration: ${formatDuration(duration)}`);
+    console.log(`📊 Strings translated: ${translatedTotal}/${totalStrings * locales.length} (per-locale quota: ${totalStrings})`);
+    console.log(`🌍 Locales: ${successCount}/${locales.length} completed`);
+    const tokenLine = formatTokenUsage(this.tokenUsage);
+    if (tokenLine) console.log(tokenLine);
+
+    for (const result of results) {
+      if (result.success) {
+        console.log(`   ✅ ${result.path} (${result.translatedCount}/${totalStrings})`);
+      } else if (result.aborted) {
+        console.log(`   ⏸️  ${result.locale}: aborted (${result.translatedCount}/${totalStrings} saved)`);
+        if (result.path) console.log(`      partial: ${result.path}`);
+      } else {
+        console.log(`   ❌ ${result.locale}: ${result.error}`);
+        console.log(`      progress: ${result.translatedCount}/${totalStrings}`);
+        if (result.path) console.log(`      partial saved: ${result.path}`);
+      }
+    }
+
+    if (!success && primaryFailure) {
+      console.log(`💥 Error: ${primaryFailure.error}`);
+    }
+
+    console.log('='.repeat(60));
+  }
+
   async translateJsonFile(inputPath, locales, outputDir = './locales', { force = false } = {}) {
     this.hashManager = new HashManager(outputDir);
+    this.resetAbortState();
+    this.resetTokenUsage();
+    this.translationCache.clear();
+
     const sourceJson = await fs.readJson(inputPath);
 
     let jsonToTranslate = sourceJson;
@@ -165,7 +286,7 @@ class Translator {
 
       if (newStringsCount === 0) {
         console.log('✅ All strings are already translated! No new changes.');
-        return;
+        return { success: true, results: [], totalStrings: 0 };
       }
 
       jsonToTranslate = this.hashManager.filterNewStrings(sourceJson, newStrings);
@@ -185,29 +306,49 @@ class Translator {
 
     const startTime = Date.now();
     const results = await Promise.all(locales.map((locale) => this.translateLocale(jsonToTranslate, locale)));
-
-    const currentHashes = this.hashManager.generateHashes(sourceJson);
-    await this.hashManager.saveHashes(currentHashes);
-
     const duration = Math.round((Date.now() - startTime) / 1000);
+    const success = results.every((result) => result.success);
+
+    if (success) {
+      const currentHashes = this.hashManager.generateHashes(sourceJson);
+      await this.hashManager.saveHashes(currentHashes);
+    }
+
+    this.printJsonReport({ force, duration, totalStrings, locales, results, success });
+
+    return { success, results, totalStrings, duration, tokenUsage: { ...this.tokenUsage } };
+  }
+
+  printMarkdownReport({ duration, locales, results, success }) {
+    const successCount = results.filter((result) => result.success).length;
+    const primaryFailure = results.find((result) => result.success === false && !result.aborted);
 
     console.log('');
     console.log('='.repeat(60));
-    console.log(force ? '✅ Force translation completed!' : '✅ Translation completed!');
+    if (success) {
+      console.log('✅ Markdown translation completed!');
+    } else {
+      console.log('❌ Markdown translation stopped due to an error');
+    }
     console.log(`⏱️  Duration: ${formatDuration(duration)}`);
-    console.log('📄 Created files:');
+    console.log(`🌍 Locales: ${successCount}/${locales.length} completed`);
+    const tokenLine = formatTokenUsage(this.tokenUsage);
+    if (tokenLine) console.log(tokenLine);
 
-    let successCount = 0;
     for (const result of results) {
       if (result.success) {
-        console.log(`   ✅ ${result.path}`);
-        successCount++;
+        console.log(result.skipped ? `   ⏭️  ${result.path}` : `   ✅ ${result.path}`);
+      } else if (result.aborted) {
+        console.log(`   ⏸️  ${result.locale}: aborted`);
       } else {
         console.log(`   ❌ ${result.locale}: ${result.error}`);
       }
     }
 
-    console.log(`📊 Successfully translated: ${successCount}/${locales.length} locale(s)`);
+    if (!success && primaryFailure) {
+      console.log(`💥 Error: ${primaryFailure.error}`);
+    }
+
     console.log('='.repeat(60));
   }
 
@@ -217,6 +358,9 @@ class Translator {
     if (!await fs.pathExists(sourcePath)) {
       throw new Error(`en.md not found in directory: ${dir}`);
     }
+
+    this.resetAbortState();
+    this.resetTokenUsage();
 
     const sourceContent = await fs.readFile(sourcePath, 'utf8');
     const startTime = Date.now();
@@ -240,7 +384,7 @@ class Translator {
 
     if (localesToTranslate.length === 0) {
       console.log('✅ All locale files already exist. Nothing to translate.');
-      return;
+      return { success: true, results: skippedResults };
     }
 
     console.log(`🚀 Translating into ${localesToTranslate.length} locale(s) (max ${this.maxConcurrent} threads)`);
@@ -254,47 +398,58 @@ class Translator {
 
     const tasks = localesToTranslate.map((locale) => (async () => {
       const targetPath = path.join(dir, `${locale}.md`);
+      let acquired = false;
 
-      await this.acquire();
       try {
-        const translated = await translateMarkdownWithGpt(
-          sourceContent,
-          locale,
-          'en',
-          this.openAiKey,
-          this.model,
-          temperature,
-        );
-        await fs.writeFile(targetPath, translated, 'utf8');
-        this.progressTracker.incrementProgress(locale);
-        return { locale, success: true, path: targetPath };
+        this.throwIfAborted();
+        await this.acquire();
+        acquired = true;
+        this.throwIfAborted();
+
+        try {
+          const { text: translated, usage } = await translateMarkdownWithGpt(
+            sourceContent,
+            locale,
+            'en',
+            this.openAiKey,
+            this.model,
+            temperature,
+            { context: this.context },
+          );
+          addTokenUsage(this.tokenUsage, usage);
+          await fs.writeFile(targetPath, translated, 'utf8');
+          this.progressTracker.incrementProgress(locale);
+          return { locale, success: true, path: targetPath };
+        } catch (error) {
+          if (error?.cause === this.abortError || (this.abortError && error.message.startsWith('Aborted after failure'))) {
+            throw error;
+          }
+          this.abort(error, locale);
+          throw error;
+        }
       } catch (error) {
-        return { locale, success: false, error: error.message };
+        const isPrimaryFailure = this.abortLocale === locale;
+        return {
+          locale,
+          success: false,
+          error: isPrimaryFailure
+            ? error.message
+            : `Aborted after failure in ${this.abortLocale}: ${this.abortError?.message || error.message}`,
+          aborted: !isPrimaryFailure,
+        };
       } finally {
-        this.release();
+        if (acquired) this.release();
       }
     })());
 
-    const results = [...skippedResults, ...(await Promise.all(tasks))];
+    const translatedResults = await Promise.all(tasks);
+    const results = [...skippedResults, ...translatedResults];
     const duration = Math.round((Date.now() - startTime) / 1000);
+    const success = results.every((result) => result.success);
 
-    console.log('');
-    console.log('='.repeat(60));
-    console.log('✅ Markdown translation completed!');
-    console.log(`⏱️  Duration: ${formatDuration(duration)}`);
+    this.printMarkdownReport({ duration, locales, results, success });
 
-    let successCount = 0;
-    for (const result of results) {
-      if (result.success) {
-        console.log(result.skipped ? `   ⏭️  ${result.path}` : `   ✅ ${result.path}`);
-        successCount++;
-      } else {
-        console.log(`   ❌ ${result.locale}: ${result.error}`);
-      }
-    }
-
-    console.log(`📊 Successful: ${successCount}/${locales.length} locale(s)`);
-    console.log('='.repeat(60));
+    return { success, results, duration, tokenUsage: { ...this.tokenUsage } };
   }
 }
 

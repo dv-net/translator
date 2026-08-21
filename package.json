@@ -1,8 +1,8 @@
 {
   "name": "@dv.net/translator",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": false,
-  "description": "CLI and library for translating JSON and Markdown files into multiple locales",
+  "description": "CLI and library for translating JSON and Markdown with OpenAI GPT",
   "type": "module",
   "main": "./src/index.js",
   "exports": {
@@ -35,6 +35,8 @@
   "keywords": [
     "dv-net",
     "translator",
+    "openai",
+    "gpt",
     "json",
     "markdown",
     "localization",
@@ -47,8 +49,8 @@
     "pack:check": "npm pack --dry-run"
   },
   "dependencies": {
-    "axios": "^1.6.0",
     "commander": "^11.1.0",
+    "dotenv": "^17.4.2",
     "fs-extra": "^11.1.1",
     "openai": "^5.13.1"
   }

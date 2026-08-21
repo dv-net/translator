@@ -1,4 +1,10 @@
 import OpenAI from 'openai';
+import {
+  DEFAULT_MARKDOWN_REQUEST_TIMEOUT_MS,
+  DEFAULT_MODEL,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+} from '../constants/defaults.js';
+import { getMarkdownTranslationPrompt, getTextTranslationPrompt } from '../constants/prompts.js';
 
 const openAIClients = new Map();
 
@@ -7,26 +13,78 @@ function getOrCreateOpenAI(apiKey) {
     return openAIClients.get(apiKey);
   }
 
-  const client = new OpenAI({ apiKey });
+  const client = new OpenAI({
+    apiKey,
+    timeout: DEFAULT_REQUEST_TIMEOUT_MS,
+    maxRetries: 0,
+  });
   openAIClients.set(apiKey, client);
   return client;
 }
 
-export async function translateTextWithGpt(text, targetLocale, sourceLocale, apiKey, model = 'gpt-4o-mini') {
+function requestOptions(timeoutMs) {
+  return {
+    timeout: timeoutMs,
+    maxRetries: 0,
+    signal: AbortSignal.timeout(timeoutMs),
+  };
+}
+
+function formatTimeoutError(error, timeoutMs) {
+  if (error?.name === 'TimeoutError' || error?.name === 'AbortError' || error?.constructor?.name === 'APIConnectionTimeoutError') {
+    return new Error(`OpenAI request timed out after ${timeoutMs}ms`);
+  }
+  return error;
+}
+
+export function normalizeUsage(usage) {
+  if (!usage || typeof usage !== 'object') {
+    return { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  }
+
+  const promptTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+  const completionTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
+  const totalTokens = usage.total_tokens ?? promptTokens + completionTokens;
+
+  return {
+    promptTokens: Number(promptTokens) || 0,
+    completionTokens: Number(completionTokens) || 0,
+    totalTokens: Number(totalTokens) || 0,
+  };
+}
+
+export async function translateTextWithGpt(
+  text,
+  targetLocale,
+  sourceLocale,
+  apiKey,
+  model = DEFAULT_MODEL,
+  { context = null, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {},
+) {
   const openai = getOrCreateOpenAI(apiKey);
 
-  const response = await openai.chat.completions.create({
-    model,
-    messages: [
+  try {
+    const response = await openai.chat.completions.create(
       {
-        role: 'system',
-        content: `You are a translation assistant. Translate the following text from ${sourceLocale} to ${targetLocale}. Return only the translated text.`,
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: getTextTranslationPrompt(sourceLocale, targetLocale, { context }),
+          },
+          { role: 'user', content: text },
+        ],
       },
-      { role: 'user', content: text },
-    ],
-  });
+      requestOptions(timeoutMs),
+    );
 
-  return response.choices[0].message.content.trim();
+    return {
+      text: response.choices[0].message.content.trim(),
+      usage: normalizeUsage(response.usage),
+    };
+  } catch (error) {
+    throw formatTimeoutError(error, timeoutMs);
+  }
 }
 
 export async function translateMarkdownWithGpt(
@@ -34,22 +92,36 @@ export async function translateMarkdownWithGpt(
   targetLocale,
   sourceLocale = 'en',
   apiKey,
-  model = 'gpt-4o-mini',
+  model = DEFAULT_MODEL,
   temperature = 1,
+  {
+    context = null,
+    timeoutMs = DEFAULT_MARKDOWN_REQUEST_TIMEOUT_MS,
+  } = {},
 ) {
   const openai = getOrCreateOpenAI(apiKey);
 
-  const response = await openai.chat.completions.create({
-    model,
-    temperature,
-    messages: [
+  try {
+    const response = await openai.chat.completions.create(
       {
-        role: 'system',
-        content: `You are a professional localization assistant. Translate Markdown from ${sourceLocale} to ${targetLocale}. Preserve all Markdown syntax, code blocks, inline code, front matter, links, and do not translate code identifiers or URLs. Keep HTML tags and placeholders like {variable} intact.`,
+        model,
+        temperature,
+        messages: [
+          {
+            role: 'system',
+            content: getMarkdownTranslationPrompt(sourceLocale, targetLocale, { context }),
+          },
+          { role: 'user', content },
+        ],
       },
-      { role: 'user', content },
-    ],
-  });
+      requestOptions(timeoutMs),
+    );
 
-  return response.choices[0].message.content.trim();
+    return {
+      text: response.choices[0].message.content.trim(),
+      usage: normalizeUsage(response.usage),
+    };
+  } catch (error) {
+    throw formatTimeoutError(error, timeoutMs);
+  }
 }
