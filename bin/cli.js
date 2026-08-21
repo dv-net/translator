@@ -85,8 +85,8 @@ program
   });
 
 program
-  .command('info')
-  .description('Show supported locales')
+  .command('locales')
+  .description('List supported locales')
   .action(() => {
     const supportedLocales = loadLocales();
     console.log('🌍 Supported locales:');

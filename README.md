@@ -52,7 +52,7 @@ dv-translator translate-md --dir blog/translates -l ru --context "Dental clinic"
 dv-translator status --dir i18n/locales   # new/changed strings vs hashes
 dv-translator prune --dir i18n/locales    # drop keys missing from en.json
 dv-translator clean --dir i18n/locales    # delete locale files + hashes
-dv-translator info                       # list supported locales
+dv-translator locales                    # list supported locales
 ```
 
 ## ⚙️ Defaults
@@ -63,7 +63,7 @@ Out of the box:
 |---------|---------|
 | Provider | OpenAI GPT only |
 | Model | `gpt-5.5` |
-| Locales | default `ru,es,fr,de` (4); `--all` → 34 supported (see `info`) |
+| Locales | default `ru,es,fr,de` (4); `--all` → 34 supported (see `locales`) |
 | Threads | `10` (max `20`) |
 | JSON request timeout | `100s` |
 | Markdown request timeout | `180s` |
@@ -125,7 +125,7 @@ Only `en.*` are tracked; generated `ru.*` / hashes stay local (gitignored).
 yarn install
 cp .env.example .env   # set OPENAI_API_KEY
 
-yarn start info                                          # list supported locales
+yarn start locales                                       # list supported locales
 yarn start translate --dir examples/locales -l ru        # translate JSON → ru
 yarn start translate --dir examples/locales -l ru -f     # force re-translate JSON
 yarn start translate --dir examples/locales -l ru --context "Dental clinic"  # with domain context
