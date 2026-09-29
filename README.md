@@ -11,7 +11,7 @@ yarn add -D @dv.net/translator
 ```json
 {
   "devDependencies": {
-    "@dv.net/translator": "^2.0.0"
+    "@dv.net/translator": "^2.0.1"
   },
   "scripts": {
     "i18n": "dv-translator translate --dir i18n/locales --all --exclude ru",
@@ -63,7 +63,7 @@ Out of the box:
 |---------|---------|
 | Provider | OpenAI GPT only |
 | Model | `gpt-5.5` |
-| Locales | default `ru,es,fr,de` (4); `--all` → 34 supported (see `locales`) |
+| Locales | default `ru,es,fr,de` (4); `--all` → 38 supported (see `locales`) |
 | Threads | `10` (max `20`) |
 | JSON request timeout | `100s` |
 | Markdown request timeout | `180s` |

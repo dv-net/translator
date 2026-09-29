@@ -1,6 +1,6 @@
 {
   "name": "@dv.net/translator",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": false,
   "description": "CLI and library for translating JSON and Markdown with OpenAI GPT",
   "type": "module",
@@ -18,7 +18,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=18"
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   },
   "publishConfig": {
     "access": "public"
