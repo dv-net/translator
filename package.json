@@ -1,6 +1,6 @@
 {
   "name": "@dv.net/translator",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "private": false,
   "description": "CLI and library for translating JSON and Markdown with OpenAI GPT",
   "type": "module",
